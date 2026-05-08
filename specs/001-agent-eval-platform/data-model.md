@@ -1,0 +1,113 @@
+# Data Model: Agent Evaluation Platform
+
+**Date**: 2026-05-08
+**Feature**: [spec.md](./spec.md)
+
+## Entity Relationship Diagram
+
+```
+Dataset 1 ──── * TestCase       (embedded JSON array)
+Task    * ──── 1 Dataset        (foreign key reference)
+Task    1 ──── 1 Result         (embedded JSON object)
+Result  1 ──── * CaseResult     (embedded JSON array)
+CaseResult 1 ──── * TraceEvent  (embedded JSON array)
+```
+
+## Entities
+
+### Dataset
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| id | UUID / INTEGER | PK, auto-generated | Unique identifier |
+| name | String(255) | NOT NULL, UNIQUE | Human-readable dataset name |
+| description | Text | NULLABLE | Optional description |
+| cases | JSON (TEXT) | NOT NULL | Array of TestCase objects |
+| created_at | DateTime | NOT NULL, auto | Creation timestamp |
+
+**Validation Rules**:
+- `cases` must be a non-empty JSON array
+- Each case must have a unique `id` within the dataset
+- Each case must have `input` (required string)
+
+**Lifecycle**: Created → (optionally deleted). No update operation (upload new dataset instead).
+
+**Referential Integrity**: A dataset cannot be deleted if any task with status `running` references it.
+
+### Test Case (embedded in Dataset.cases)
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| id | String(50) | NOT NULL, unique within dataset | Case identifier (e.g., "case_01") |
+| input | Text | NOT NULL | Natural language travel request |
+| expected_constraints | JSON | NULLABLE | Constraints to verify: destination, days, budget_limit, must_include_keywords |
+| expected_tool_sequence | JSON Array | NULLABLE | Expected tool call order (e.g., ["search_attractions", "query_weather"]) |
+| difficulty | Enum | "easy" / "medium" / "hard" | Test case difficulty level |
+
+### Task
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| id | UUID / INTEGER | PK, auto-generated | Unique identifier |
+| name | String(255) | NOT NULL | Human-readable task name |
+| agent_version | String(100) | NOT NULL | Agent version identifier (e.g., "v1.0.0") |
+| dataset_id | FK → Dataset.id | NOT NULL | Reference to the dataset used |
+| metrics | JSON Array | NOT NULL, min 1 item | Selected metric names (e.g., ["success_rate", "tool_accuracy"]) |
+| agent_endpoint | String(500) | NOT NULL, valid URL | Agent Platform API endpoint |
+| weight_config | JSON | NULLABLE | Metric weight map; if null, equal weights |
+| status | Enum | "pending" / "running" / "done" / "failed" | Current task state |
+| progress_current | Integer | DEFAULT 0 | Number of completed test cases |
+| progress_total | Integer | DEFAULT 0 | Total test cases in dataset |
+| result | JSON | NULLABLE | Full evaluation result (populated on completion) |
+| error_message | Text | NULLABLE | Error description if status is "failed" |
+| created_at | DateTime | NOT NULL, auto | Creation timestamp |
+| updated_at | DateTime | NOT NULL, auto | Last update timestamp |
+
+**State Machine**:
+```
+pending ──[execute]──> running ──[all cases done]──> done
+                           │
+                           └──[fatal error]──> failed
+                           
+[delete allowed]: pending, done, failed
+[delete blocked]: running
+```
+
+### Result (embedded in Task.result)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| overall_score | Float (0-1) | Weighted composite score |
+| metric_scores | JSON Object | `{"metric_name": avg_score}` |
+| case_results | JSON Array | Array of CaseResult objects |
+| execution_time_seconds | Float | Total task execution wall time |
+| started_at | DateTime | Execution start timestamp |
+| completed_at | DateTime | Execution end timestamp |
+
+### Case Result (embedded in Result.case_results)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| case_id | String | Reference to source TestCase.id |
+| status | Enum | "passed" / "failed" / "error" |
+| metric_scores | JSON Object | `{"metric_name": score (0-1)}` |
+| metric_details | JSON Object | Per-metric breakdown (diff tables, LLM comments) |
+| agent_output | JSON | Raw output from Agent Platform |
+| agent_trace | JSON Array | Array of TraceEvent objects |
+| error_message | String | NULLABLE, populated on failure/error |
+
+### Trace Event (embedded in CaseResult.agent_trace)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| timestamp | DateTime / String | Event timestamp |
+| event_type | Enum | "thought" / "tool_call" / "observation" |
+| data | JSON | Event payload (tool_name, content, params, result_summary) |
+
+## Database Implementation Notes
+
+- SQLAlchemy ORM models in `backend/models/`
+- `cases` (Dataset) and `result` (Task) stored as JSON TEXT columns via `sqlalchemy.types.JSON`
+- Foreign key from Task to Dataset enforced at application level (SQLite FK support must be explicitly enabled)
+- UUIDs generated by application, not database
+- Indexes: `Task.status` (for filtering), `Task.created_at` (for ordering)

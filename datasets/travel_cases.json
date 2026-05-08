@@ -1,0 +1,126 @@
+{
+  "name": "旅行规划Agent评估数据集",
+  "description": "包含10个不同难度级别的旅行规划测试用例，用于评估智能Agent的旅行规划能力。涵盖景点搜索、天气查询、预算估算等核心场景。",
+  "cases": [
+    {
+      "id": "case_01",
+      "input": "请帮我规划一次为期3天的北京之旅，预算控制在3000元以内。",
+      "expected_constraints": {
+        "destination": "北京",
+        "days": 3,
+        "budget_limit": 3000,
+        "must_include_keywords": ["故宫", "长城"]
+      },
+      "expected_tool_sequence": ["search_attractions", "estimate_budget", "query_weather"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "case_02",
+      "input": "我想去上海玩2天，主要想看看外滩和东方明珠，预算5000元。",
+      "expected_constraints": {
+        "destination": "上海",
+        "days": 2,
+        "budget_limit": 5000,
+        "must_include_keywords": ["外滩", "东方明珠"]
+      },
+      "expected_tool_sequence": ["search_attractions", "estimate_budget"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "case_03",
+      "input": "帮我安排一个成都4日游，必须包含大熊猫基地和都江堰，预算不限。顺便帮我查一下那几天的天气。",
+      "expected_constraints": {
+        "destination": "成都",
+        "days": 4,
+        "budget_limit": null,
+        "must_include_keywords": ["大熊猫基地", "都江堰"]
+      },
+      "expected_tool_sequence": ["search_attractions", "query_weather", "estimate_budget"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "case_04",
+      "input": "我打算从杭州出发去三亚度假5天，需要预订海边酒店、查天气和机票价格。预算15000元左右。",
+      "expected_constraints": {
+        "destination": "三亚",
+        "days": 5,
+        "budget_limit": 15000,
+        "must_include_keywords": ["海边酒店", "机票"]
+      },
+      "expected_tool_sequence": ["search_attractions", "query_weather", "estimate_budget", "search_hotels", "search_flights"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "case_05",
+      "input": "给我规划一个7天的云南深度游路线，包括昆明、大理、丽江、香格里拉，坐高铁或飞机，考虑当地交通安排。预算2万元。",
+      "expected_constraints": {
+        "destination": "云南",
+        "days": 7,
+        "budget_limit": 20000,
+        "must_include_keywords": ["昆明", "大理", "丽江", "香格里拉", "高铁", "交通"]
+      },
+      "expected_tool_sequence": ["search_attractions", "plan_route", "search_transportation", "estimate_budget", "query_weather"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "case_06",
+      "input": "我爸妈想去桂林阳朔玩3天，年纪大了需要舒适的酒店和轻松的行程。帮我推荐适合老年人的景点和住宿。",
+      "expected_constraints": {
+        "destination": "桂林",
+        "days": 3,
+        "budget_limit": null,
+        "must_include_keywords": ["阳朔", "漓江", "舒适酒店", "轻松的行程"]
+      },
+      "expected_tool_sequence": ["search_attractions", "search_hotels", "estimate_budget"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "case_07",
+      "input": "帮我规划一个西安美食之旅，3天时间，主要想吃遍回民街和各种老字号，顺便看兵马俑。预算6000块。看看天气如何。",
+      "expected_constraints": {
+        "destination": "西安",
+        "days": 3,
+        "budget_limit": 6000,
+        "must_include_keywords": ["回民街", "老字号", "兵马俑", "美食"]
+      },
+      "expected_tool_sequence": ["search_attractions", "search_restaurants", "query_weather", "estimate_budget"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "case_08",
+      "input": "我计划环游新疆15天，从乌鲁木齐出发，经过天山、喀纳斯、吐鲁番、喀什，需要租车自驾。帮我规划路线并预估总花费。",
+      "expected_constraints": {
+        "destination": "新疆",
+        "days": 15,
+        "budget_limit": null,
+        "must_include_keywords": ["乌鲁木齐", "天山", "喀纳斯", "吐鲁番", "喀什", "租车"]
+      },
+      "expected_tool_sequence": ["search_attractions", "plan_route", "search_transportation", "estimate_budget", "query_weather", "search_hotels"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "case_09",
+      "input": "我想在冬天去东北哈尔滨看冰雕，然后去雪乡和长白山滑雪，最后从沈阳回程。整个行程8天，需要坐高铁和包车，预算1万元内。查一下那边冬天天气情况，推荐滑雪装备租赁信息。",
+      "expected_constraints": {
+        "destination": "东北",
+        "days": 8,
+        "budget_limit": 10000,
+        "must_include_keywords": ["哈尔滨", "冰雕", "雪乡", "长白山", "滑雪", "高铁", "包车", "装备租赁"]
+      },
+      "expected_tool_sequence": ["query_weather", "search_attractions", "plan_route", "search_transportation", "search_hotels", "estimate_budget", "search_equipment_rental"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "case_10",
+      "input": "给我设计一个江南古镇6日摄影之旅，从南京出发，依次经过苏州、周庄、同里、乌镇、南浔、西塘，最后到杭州结束。需要考虑每个古镇的最佳拍摄时间（清晨/黄昏），预算不计，但要选有特色的民宿。查沿途天气和古镇门票价格。",
+      "expected_constraints": {
+        "destination": "江南",
+        "days": 6,
+        "budget_limit": null,
+        "must_include_keywords": ["南京", "苏州", "周庄", "同里", "乌镇", "南浔", "西塘", "杭州", "清晨", "黄昏", "民宿", "门票"]
+      },
+      "expected_tool_sequence": ["search_attractions", "plan_route", "query_weather", "search_hotels", "search_transportation", "estimate_budget", "check_ticket_prices"],
+      "difficulty": "hard"
+    }
+  ]
+}

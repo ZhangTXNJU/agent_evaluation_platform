@@ -110,4 +110,7 @@ eval-platform/
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
+at specs/001-agent-eval-platform/plan.md for implementation decisions,
+data model at specs/001-agent-eval-platform/data-model.md,
+and API contracts at specs/001-agent-eval-platform/contracts/api-v1.yaml.
 <!-- SPECKIT END -->

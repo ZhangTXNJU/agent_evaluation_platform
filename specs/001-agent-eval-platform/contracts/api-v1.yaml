@@ -1,0 +1,529 @@
+openapi: "3.0.3"
+info:
+  title: Agent Evaluation Platform API
+  version: "1.0.0"
+  description: REST API for managing evaluation tasks, datasets, and comparison analysis.
+
+servers:
+  - url: http://localhost:8001/api/v1
+    description: Local development server
+
+paths:
+  # ── Datasets ──
+  /datasets:
+    get:
+      summary: List all datasets
+      operationId: listDatasets
+      responses:
+        "200":
+          description: Dataset list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DatasetSummary"
+    post:
+      summary: Upload a new dataset
+      operationId: createDataset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetCreate"
+      responses:
+        "201":
+          description: Dataset created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetSummary"
+        "400":
+          description: Invalid JSON or empty cases array
+
+  /datasets/{dataset_id}:
+    get:
+      summary: Get dataset details including all test cases
+      operationId: getDataset
+      parameters:
+        - name: dataset_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Full dataset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetDetail"
+        "404":
+          description: Dataset not found
+    delete:
+      summary: Delete a dataset
+      operationId: deleteDataset
+      parameters:
+        - name: dataset_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "409":
+          description: Cannot delete — dataset referenced by running task
+
+  # ── Tasks ──
+  /tasks:
+    get:
+      summary: List tasks (paginated)
+      operationId: listTasks
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, running, done, failed]
+      responses:
+        "200":
+          description: Paginated task list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskListResponse"
+    post:
+      summary: Create a new evaluation task
+      operationId: createTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskCreate"
+      responses:
+        "201":
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskSummary"
+        "400":
+          description: Invalid configuration (e.g., no metrics selected)
+
+  /tasks/{task_id}:
+    get:
+      summary: Get task details (including result if done)
+      operationId: getTask
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "404":
+          description: Task not found
+    delete:
+      summary: Delete a task (only if not running)
+      operationId: deleteTask
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "409":
+          description: Cannot delete running task
+
+  /tasks/{task_id}/execute:
+    post:
+      summary: Start task execution
+      operationId: executeTask
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Execution started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskSummary"
+        "409":
+          description: Task is already running
+
+  /tasks/{task_id}/result:
+    get:
+      summary: Get full evaluation result
+      operationId: getTaskResult
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Full result with per-case breakdowns
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvaluationResult"
+        "404":
+          description: Task not found or not yet completed
+
+  /tasks/{task_id}/result/summary:
+    get:
+      summary: Get result summary (overall scores only)
+      operationId: getTaskResultSummary
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Result summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResultSummary"
+
+  # ── Compare ──
+  /compare:
+    post:
+      summary: Submit comparison request
+      operationId: compareTasks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompareRequest"
+      responses:
+        "200":
+          description: Comparison data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompareResponse"
+        "400":
+          description: Fewer than 2 valid task IDs
+
+  /compare/data:
+    get:
+      summary: Get comparison data (GET convenience)
+      operationId: compareTasksGet
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Comma-separated task IDs (e.g., "id1,id2")
+      responses:
+        "200":
+          description: Comparison data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompareResponse"
+
+components:
+  schemas:
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+
+    DatasetSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        case_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    DatasetCreate:
+      type: object
+      required: [name, cases]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        cases:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/TestCase"
+
+    DatasetDetail:
+      allOf:
+        - $ref: "#/components/schemas/DatasetSummary"
+        - type: object
+          properties:
+            cases:
+              type: array
+              items:
+                $ref: "#/components/schemas/TestCase"
+
+    TestCase:
+      type: object
+      required: [id, input]
+      properties:
+        id:
+          type: string
+        input:
+          type: string
+        expected_constraints:
+          type: object
+          properties:
+            destination:
+              type: string
+            days:
+              type: integer
+            budget_limit:
+              type: number
+            must_include_keywords:
+              type: array
+              items:
+                type: string
+        expected_tool_sequence:
+          type: array
+          items:
+            type: string
+        difficulty:
+          type: string
+          enum: [easy, medium, hard]
+
+    TaskCreate:
+      type: object
+      required: [name, agent_version, dataset_id, metrics]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        agent_version:
+          type: string
+          maxLength: 100
+        dataset_id:
+          type: string
+        metrics:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        agent_endpoint:
+          type: string
+          format: uri
+          default: "http://localhost:8000/api/eval/run"
+        weight_config:
+          type: object
+          additionalProperties:
+            type: number
+          default: {}
+
+    TaskSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        agent_version:
+          type: string
+        dataset_name:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, done, failed]
+        progress_current:
+          type: integer
+        progress_total:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    TaskListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskSummary"
+        total:
+          type: integer
+        page:
+          type: integer
+        size:
+          type: integer
+
+    TaskDetail:
+      allOf:
+        - $ref: "#/components/schemas/TaskSummary"
+        - type: object
+          properties:
+            dataset_id:
+              type: string
+            metrics:
+              type: array
+              items:
+                type: string
+            agent_endpoint:
+              type: string
+            weight_config:
+              type: object
+            result:
+              $ref: "#/components/schemas/EvaluationResult"
+            error_message:
+              type: string
+            updated_at:
+              type: string
+              format: date-time
+
+    EvaluationResult:
+      type: object
+      properties:
+        overall_score:
+          type: number
+          minimum: 0
+          maximum: 1
+        metric_scores:
+          type: object
+          additionalProperties:
+            type: number
+        case_results:
+          type: array
+          items:
+            $ref: "#/components/schemas/CaseResult"
+        execution_time_seconds:
+          type: number
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+
+    ResultSummary:
+      type: object
+      properties:
+        overall_score:
+          type: number
+        metric_scores:
+          type: object
+
+    CaseResult:
+      type: object
+      properties:
+        case_id:
+          type: string
+        status:
+          type: string
+          enum: [passed, failed, error]
+        metric_scores:
+          type: object
+        metric_details:
+          type: object
+        agent_output:
+          type: object
+        agent_trace:
+          type: array
+          items:
+            $ref: "#/components/schemas/TraceEvent"
+        error_message:
+          type: string
+
+    TraceEvent:
+      type: object
+      properties:
+        timestamp:
+          type: string
+        event_type:
+          type: string
+          enum: [thought, tool_call, observation]
+        data:
+          type: object
+
+    CompareRequest:
+      type: object
+      required: [task_ids]
+      properties:
+        task_ids:
+          type: array
+          minItems: 2
+          items:
+            type: string
+
+    CompareResponse:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskSummary"
+        metrics_comparison:
+          type: object
+          properties:
+            metric_names:
+              type: array
+              items:
+                type: string
+            scores:
+              type: array
+              items:
+                type: object
+                properties:
+                  task_id:
+                    type: string
+                  task_name:
+                    type: string
+                  metric_scores:
+                    type: object
+                  overall_score:
+                    type: number
