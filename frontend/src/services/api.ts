@@ -16,6 +16,7 @@ import type {
   CompareRequest,
   CompareResponse,
   SuccessResponse,
+  EndpointPreset,
 } from '../types';
 
 // 后端API基础路径（开发环境通过Vite代理转发）
@@ -131,4 +132,12 @@ export const compareApi = {
   },
 };
 
-export default { datasetApi, taskApi, resultApi, compareApi };
+// ── 适配器/预设 API ──
+export const adapterApi = {
+  /** 列出所有可用适配器及描述 */
+  listAdapters: () => request<Record<string, string>>('/adapters'),
+  /** 列出 Agent endpoint 常用预设(供前端下拉) */
+  listPresets: () => request<EndpointPreset[]>('/endpoint-presets'),
+};
+
+export default { datasetApi, taskApi, resultApi, compareApi, adapterApi };

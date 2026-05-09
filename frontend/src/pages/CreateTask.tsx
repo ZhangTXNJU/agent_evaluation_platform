@@ -1,9 +1,12 @@
 /**
- * 创建任务页面 (T036)
- * 表单：选择数据集、配置评估指标、指定Agent端点、设置权重。
+ * 创建任务页面 (T036 + Adapter 改造)
+ * 表单:
+ * - 基本信息: 任务名 / Agent 版本 / 数据集
+ * - 评估指标 + 自定义权重
+ * - Agent 接入: 端点预设下拉(可选自定义) + endpoint URL + 适配器配置 JSON
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Form,
@@ -16,14 +19,17 @@ import {
   InputNumber,
   Space,
   Divider,
+  Tag,
+  Tooltip,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
-import { datasetApi, taskApi } from '../services/api';
+import { PlusOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { datasetApi, taskApi, adapterApi } from '../services/api';
 import MetricsSelector from '../components/MetricsSelector';
 import { AVAILABLE_METRICS } from '../components/MetricsSelector';
-import type { DatasetSummary } from '../types';
+import type { DatasetSummary, EndpointPreset } from '../types';
 
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
+const { TextArea } = Input;
 
 interface TaskFormValues {
   name: string;
@@ -31,7 +37,7 @@ interface TaskFormValues {
   dataset_id: string;
   metrics: string[];
   agent_endpoint: string;
-  // 自定义权重（可选）
+  // 自定义权重(可选)
   weight_success_rate?: number;
   weight_tool_accuracy?: number;
   weight_llm_judge?: number;
@@ -41,29 +47,94 @@ interface TaskFormValues {
 const CreateTask: React.FC = () => {
   const navigate = useNavigate();
   const [form] = Form.useForm<TaskFormValues>();
+
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
+  const [presets, setPresets] = useState<EndpointPreset[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
 
-  // ── 加载数据集列表供下拉选择 ──
+  // 当前选中的预设 key (默认走 native_local 保持向后兼容)
+  const [presetKey, setPresetKey] = useState<string>('native_local');
+  // 当前 adapter_type / adapter_config (跟随 preset 改变,但用户可以手动编辑)
+  const [adapterType, setAdapterType] = useState<string>('native');
+  const [adapterConfigText, setAdapterConfigText] = useState<string>('{}');
+  const [adapterConfigError, setAdapterConfigError] = useState<string | null>(null);
+
+  // ── 初始化加载 ──
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       try {
-        const data = await datasetApi.list();
-        setDatasets(data);
+        const [ds, pr] = await Promise.all([
+          datasetApi.list(),
+          adapterApi.listPresets().catch(() => [] as EndpointPreset[]),
+        ]);
+        setDatasets(ds);
+        setPresets(pr);
+        // 应用默认预设
+        const defaultPreset = pr.find((p) => p.key === 'native_local') || pr[0];
+        if (defaultPreset) {
+          applyPreset(defaultPreset);
+        }
       } catch (err) {
-        message.error('加载数据集失败: ' + (err as Error).message);
+        message.error('加载初始数据失败: ' + (err as Error).message);
       } finally {
         setLoading(false);
       }
     };
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── 提交表单 ──
+  // 当前预设对象
+  const currentPreset = useMemo(
+    () => presets.find((p) => p.key === presetKey),
+    [presets, presetKey]
+  );
+
+  // ── 应用预设到表单 ──
+  const applyPreset = (preset: EndpointPreset) => {
+    setPresetKey(preset.key);
+    setAdapterType(preset.adapter_type);
+    form.setFieldValue('agent_endpoint', preset.agent_endpoint);
+    setAdapterConfigText(
+      JSON.stringify(preset.adapter_config || {}, null, 2)
+    );
+    setAdapterConfigError(null);
+  };
+
+  const handlePresetChange = (key: string) => {
+    const p = presets.find((x) => x.key === key);
+    if (p) applyPreset(p);
+  };
+
+  // ── 解析适配器配置 JSON ──
+  const parseAdapterConfig = (): Record<string, unknown> | null => {
+    const txt = adapterConfigText.trim();
+    if (!txt) return {};
+    try {
+      const parsed = JSON.parse(txt);
+      if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
+        setAdapterConfigError('适配器配置必须是 JSON 对象');
+        return null;
+      }
+      setAdapterConfigError(null);
+      return parsed as Record<string, unknown>;
+    } catch (e) {
+      setAdapterConfigError('JSON 格式错误: ' + (e as Error).message);
+      return null;
+    }
+  };
+
+  // ── 提交 ──
   const handleSubmit = async (values: TaskFormValues) => {
+    const adapterConfig = parseAdapterConfig();
+    if (adapterConfig === null) {
+      message.error('请修正适配器配置 JSON');
+      return;
+    }
+
     setSubmitting(true);
     try {
       // 构建权重配置
@@ -78,7 +149,9 @@ const CreateTask: React.FC = () => {
       let hasCustomWeights = false;
       for (const metric of values.metrics) {
         const weightKey = metricWeightMap[metric];
-        const weightVal = (values as unknown as Record<string, unknown>)[weightKey] as number | undefined;
+        const weightVal = (values as unknown as Record<string, unknown>)[
+          weightKey
+        ] as number | undefined;
         if (weightVal !== undefined && weightVal !== null) {
           weightConfig[metric] = weightVal;
           hasCustomWeights = true;
@@ -91,6 +164,8 @@ const CreateTask: React.FC = () => {
         dataset_id: values.dataset_id,
         metrics: values.metrics,
         agent_endpoint: values.agent_endpoint,
+        adapter_type: adapterType,
+        adapter_config: Object.keys(adapterConfig).length ? adapterConfig : undefined,
         weight_config: hasCustomWeights ? weightConfig : undefined,
       });
 
@@ -118,7 +193,7 @@ const CreateTask: React.FC = () => {
             metrics: ['success_rate', 'tool_accuracy', 'llm_judge', 'response_time'],
           }}
         >
-          {/* 基本信息 */}
+          {/* ── 基本信息 ── */}
           <Form.Item
             name="name"
             label="任务名称"
@@ -138,7 +213,7 @@ const CreateTask: React.FC = () => {
             <Input placeholder="例如：v1.0.0" />
           </Form.Item>
 
-          {/* 数据集选择 */}
+          {/* ── 数据集 ── */}
           <Form.Item
             name="dataset_id"
             label="选择数据集"
@@ -162,7 +237,7 @@ const CreateTask: React.FC = () => {
             />
           </Form.Item>
 
-          {/* 指标选择 */}
+          {/* ── 指标选择 ── */}
           <Form.Item
             name="metrics"
             label="评估指标"
@@ -185,11 +260,11 @@ const CreateTask: React.FC = () => {
             />
           </Form.Item>
 
-          {/* 自定义权重 */}
+          {/* ── 自定义权重 ── */}
           {selectedMetrics.length > 0 && (
             <Card
               size="small"
-              title="自定义权重（可选，不填则等权重分配）"
+              title="自定义权重(可选,不填则等权重分配)"
               style={{ marginBottom: 16 }}
             >
               <Space wrap>
@@ -214,21 +289,103 @@ const CreateTask: React.FC = () => {
                 })}
               </Space>
               <Text type="secondary" style={{ fontSize: 12 }}>
-                权重最终会被归一化，确保总和为1。留空则所有选定指标等权重。
+                权重最终会被归一化,确保总和为1。留空则所有选定指标等权重。
               </Text>
             </Card>
           )}
 
-          {/* Agent端点 */}
+          <Divider orientation="left" plain>
+            Agent 接入配置
+          </Divider>
+
+          {/* ── 预设下拉 ── */}
+          <Form.Item
+            label={
+              <span>
+                Agent 端点预设{' '}
+                <Tooltip title="选一个常用预设会自动填入下方 URL 和适配器配置;选完后仍可在下面手动修改。">
+                  <InfoCircleOutlined style={{ color: '#999' }} />
+                </Tooltip>
+              </span>
+            }
+          >
+            <Select
+              value={presetKey}
+              onChange={handlePresetChange}
+              loading={loading}
+              optionLabelProp="label"
+              options={presets.map((p) => ({
+                value: p.key,
+                label: p.label,
+                preset: p,
+              }))}
+              optionRender={(opt) => {
+                const p = (opt.data as unknown as { preset: EndpointPreset }).preset;
+                return (
+                  <div style={{ padding: '4px 0' }}>
+                    <div>
+                      <strong>{p.label}</strong>{' '}
+                      <Tag color={p.adapter_type === 'native' ? 'blue' : 'green'}>
+                        {p.adapter_type}
+                      </Tag>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#666' }}>{p.description}</div>
+                  </div>
+                );
+              }}
+            />
+            {currentPreset && (
+              <Paragraph type="secondary" style={{ fontSize: 12, marginTop: 4, marginBottom: 0 }}>
+                {currentPreset.description}
+              </Paragraph>
+            )}
+          </Form.Item>
+
+          {/* ── Agent endpoint URL(可手动改) ── */}
           <Form.Item
             name="agent_endpoint"
-            label="Agent Platform端点"
-            rules={[{ required: true, message: '请输入Agent端点URL' }]}
+            label={
+              <span>
+                Agent 端点 URL{' '}
+                <Tag color="default">{adapterType}</Tag>
+              </span>
+            }
+            rules={[
+              { required: true, message: '请输入 Agent 端点 URL' },
+              { type: 'url', message: '请输入合法的 URL', warningOnly: true },
+            ]}
+            extra="选预设后会自动填入,你也可以手动修改为自己的服务地址。"
           >
             <Input placeholder="http://localhost:8000/api/eval/run" />
           </Form.Item>
 
-          {/* 提交 */}
+          {/* ── 适配器配置 JSON(可手动改) ── */}
+          <Form.Item
+            label={
+              <span>
+                适配器配置(JSON){' '}
+                <Tooltip title="对 native 适配器一般为空 {};对 openai_chat 需要填 api_key、model 等。">
+                  <InfoCircleOutlined style={{ color: '#999' }} />
+                </Tooltip>
+              </span>
+            }
+            validateStatus={adapterConfigError ? 'error' : ''}
+            help={adapterConfigError || '若不需要任何配置,留 {} 即可'}
+          >
+            <TextArea
+              rows={8}
+              value={adapterConfigText}
+              onChange={(e) => {
+                setAdapterConfigText(e.target.value);
+                setAdapterConfigError(null);
+              }}
+              onBlur={() => parseAdapterConfig()}
+              spellCheck={false}
+              style={{ fontFamily: 'Menlo, Consolas, monospace', fontSize: 13 }}
+            />
+          </Form.Item>
+
+          {/* ── 提交 ── */}
           <Form.Item>
             <Space>
               <Button

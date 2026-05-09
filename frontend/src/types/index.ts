@@ -36,7 +36,13 @@ export interface DatasetCreate {
 }
 
 // ── 任务相关 ──
-export type TaskStatus = 'pending' | 'running' | 'done' | 'failed';
+// 任务状态机:
+//   draft   — 已创建,等待用户手动点"执行"
+//   pending — 已提交执行,排队等 executor 拾取
+//   running — 正在执行中(executor 已认领)
+//   done    — 已完成
+//   failed  — 执行失败
+export type TaskStatus = 'draft' | 'pending' | 'running' | 'done' | 'failed';
 
 export interface TaskCreate {
   name: string;
@@ -44,6 +50,8 @@ export interface TaskCreate {
   dataset_id: string;
   metrics: string[];
   agent_endpoint?: string;
+  adapter_type?: string;
+  adapter_config?: Record<string, unknown>;
   weight_config?: Record<string, number>;
 }
 
@@ -55,6 +63,7 @@ export interface TaskSummary {
   dataset_id: string;
   metrics: string[];
   agent_endpoint: string;
+  adapter_type?: string;
   status: TaskStatus;
   progress_current: number;
   progress_total: number;
@@ -71,8 +80,19 @@ export interface TaskListResponse {
 
 export interface TaskDetail extends TaskSummary {
   weight_config?: Record<string, number>;
+  adapter_config?: Record<string, unknown>;
   result?: EvaluationResult;
   error_message?: string;
+}
+
+// ── Adapter / Endpoint 预设 ──
+export interface EndpointPreset {
+  key: string;
+  label: string;
+  description: string;
+  adapter_type: string;
+  agent_endpoint: string;
+  adapter_config: Record<string, unknown>;
 }
 
 // ── 评估结果相关 ──

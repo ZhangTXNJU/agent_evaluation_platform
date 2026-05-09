@@ -34,6 +34,12 @@ class Task(Base):
         String(500), nullable=False, default="http://localhost:8000/api/eval/run"
     )
 
+    # 适配器类型(决定如何与目标 Agent 通信),默认 "native" 向后兼容
+    adapter_type = Column(String(50), nullable=False, default="native")
+
+    # 适配器额外配置(model、api_key、temperature 等);随适配器类型不同而不同
+    adapter_config = Column(JSON, nullable=True)
+
     # 可选的自定义权重配置，不设置则等权重
     weight_config = Column(JSON, nullable=True)
 

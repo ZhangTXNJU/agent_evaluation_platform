@@ -13,7 +13,8 @@ interface StatusBadgeProps {
 
 // 状态 → 颜色映射
 const STATUS_CONFIG: Record<TaskStatus, { color: string; label: string }> = {
-  pending: { color: 'default', label: '待执行' },
+  draft: { color: 'default', label: '草稿' },
+  pending: { color: 'gold', label: '排队中' },
   running: { color: 'processing', label: '运行中' },
   done: { color: 'success', label: '已完成' },
   failed: { color: 'error', label: '失败' },

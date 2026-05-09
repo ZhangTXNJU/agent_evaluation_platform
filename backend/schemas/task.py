@@ -22,6 +22,14 @@ class TaskCreate(BaseModel):
         "http://localhost:8000/api/eval/run",
         description="Agent Platform的评估端点URL",
     )
+    adapter_type: str = Field(
+        "native",
+        description="Agent 协议适配器类型,如 'native' 或 'openai_chat'",
+    )
+    adapter_config: Optional[Dict[str, Any]] = Field(
+        None,
+        description="适配器配置(model、api_key、temperature 等),随适配器类型不同而不同",
+    )
     weight_config: Optional[Dict[str, float]] = Field(
         None, description="自定义指标权重，不设置则等权重"
     )
@@ -32,9 +40,7 @@ class TaskCreate(BaseModel):
         valid_metrics = {"success_rate", "tool_accuracy", "llm_judge", "response_time"}
         for m in self.metrics:
             if m not in valid_metrics:
-                raise ValueError(
-                    f"无效的指标名称: '{m}'，可选值: {valid_metrics}"
-                )
+                raise ValueError(f"无效的指标名称: '{m}'，可选值: {valid_metrics}")
         return self
 
 
@@ -49,6 +55,7 @@ class TaskSummary(BaseModel):
     dataset_id: str = ""
     metrics: List[str] = []
     agent_endpoint: str = ""
+    adapter_type: str = "native"
     status: str  # pending / running / done / failed
     progress_current: int = 0
     progress_total: int = 0
@@ -108,6 +115,7 @@ class TaskDetail(TaskSummary):
     """任务详情，包含完整配置和结果"""
 
     weight_config: Optional[Dict[str, float]] = None
+    adapter_config: Optional[Dict[str, Any]] = None
     result: Optional[EvaluationResult] = None
     error_message: Optional[str] = None
 
@@ -116,7 +124,9 @@ class TaskDetail(TaskSummary):
 class CompareRequest(BaseModel):
     """多任务对比请求"""
 
-    task_ids: List[str] = Field(..., min_length=2, description="要对比的任务ID列表，至少2个")
+    task_ids: List[str] = Field(
+        ..., min_length=2, description="要对比的任务ID列表，至少2个"
+    )
 
 
 class TaskCompareItem(BaseModel):

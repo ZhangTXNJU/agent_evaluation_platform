@@ -23,12 +23,16 @@ from db import SessionLocal
 from models.task import Task
 from models.dataset import Dataset
 from core.metric_factory import MetricRegistry
+from core.adapters.base import AdapterRegistry
 
 # 导入指标模块以触发注册
 import core.metrics.success_rate  # noqa: F401
 import core.metrics.tool_accuracy  # noqa: F401
 import core.metrics.llm_judge  # noqa: F401
 import core.metrics.response_time  # noqa: F401
+
+# 导入适配器模块以触发注册
+import core.adapters  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -125,9 +129,7 @@ class EvaluationExecutor:
                 return
 
             # 加载关联的数据集
-            dataset = (
-                db.query(Dataset).filter(Dataset.id == task.dataset_id).first()
-            )
+            dataset = db.query(Dataset).filter(Dataset.id == task.dataset_id).first()
             if not dataset or not dataset.cases:
                 self._fail_task(db, task, "关联的数据集为空或不存在")
                 return
@@ -143,14 +145,27 @@ class EvaluationExecutor:
             started_at = datetime.now(timezone.utc)
             metric_names = task.metrics or []
 
+            # 解析适配器(任务级,所有用例共用同一个 adapter 实例)
+            adapter_type = task.adapter_type or "native"
+            adapter = AdapterRegistry.get(adapter_type)
+            if adapter is None:
+                self._fail_task(db, task, f"未知的适配器类型: {adapter_type}")
+                return
+            adapter_config = task.adapter_config or {}
+
             for idx, case_meta in enumerate(dataset.cases):
                 case_id = case_meta.get("id", f"case_{idx}")
-                logger.debug("  执行用例: %s [%d/%d]", case_id, idx + 1, len(dataset.cases))
+                logger.debug(
+                    "  执行用例: %s [%d/%d]", case_id, idx + 1, len(dataset.cases)
+                )
 
                 # 调用Agent Platform
                 try:
                     agent_response = self._call_agent(
-                        task.agent_endpoint, case_meta, CASE_TIMEOUT
+                        task.agent_endpoint,
+                        case_meta,
+                        adapter,
+                        adapter_config,
                     )
                     case_result = self._evaluate_case(
                         case_meta, agent_response, metric_names
@@ -165,9 +180,7 @@ class EvaluationExecutor:
                     )
                 except Exception as e:
                     logger.exception("用例执行异常: %s", case_id)
-                    case_result = self._error_case(
-                        case_meta, "error", str(e)[:500]
-                    )
+                    case_result = self._error_case(case_meta, "error", str(e)[:500])
 
                 case_results.append(case_result)
 
@@ -176,7 +189,9 @@ class EvaluationExecutor:
                 db.commit()
 
                 # 通过WebSocket推送进度更新
-                self._broadcast_progress(task.id, task.progress_current, task.progress_total, "running")
+                self._broadcast_progress(
+                    task.id, task.progress_current, task.progress_total, "running"
+                )
 
             # ── 汇总计算总分 ──
             completed_at = datetime.now(timezone.utc)
@@ -261,35 +276,49 @@ class EvaluationExecutor:
         self,
         endpoint: str,
         case_meta: dict,
-        timeout: int,
+        adapter,
+        adapter_config: dict,
     ) -> dict:
         """
-        调用外部Agent Platform API。
+        通过适配器调用外部 Agent,并把响应翻译成统一三段式。
 
         Args:
-            endpoint: Agent Platform的评估端点URL
+            endpoint: 目标 Agent 的 HTTP URL(评估任务里配置的 agent_endpoint)
             case_meta: 测试用例数据
-            timeout: 超时秒数
+            adapter: 已实例化的 BaseAgentAdapter
+            adapter_config: 任务级适配器配置(model、api_key 等)
 
         Returns:
-            Agent Platform的响应JSON
+            {output, trace, metrics} 三段式 dict
 
         Raises:
             httpx.TimeoutException: 请求超时
             httpx.ConnectError: 连接失败
+            httpx.HTTPStatusError: 非 2xx 响应
         """
-        request_body = {
-            "input": case_meta.get("input", ""),
-            "session_config": {
-                "case_id": case_meta.get("id"),
-                "difficulty": case_meta.get("difficulty"),
-            },
-        }
+        request_body = adapter.build_request(case_meta, adapter_config)
+        headers = adapter.headers(adapter_config)
+        timeout = adapter.timeout_seconds(adapter_config) or CASE_TIMEOUT
 
+        # 自行测耗时,作为 response_time 指标的兜底数据源
+        t0 = time.time()
         with httpx.Client(timeout=timeout) as client:
-            response = client.post(endpoint, json=request_body)
+            response = client.post(endpoint, json=request_body, headers=headers)
             response.raise_for_status()
-            return response.json()
+            raw = response.json()
+        elapsed = time.time() - t0
+
+        parsed = adapter.parse_response(raw, adapter_config)
+        # 若适配器没在 metrics 里给出 elapsed_time,补一个真实测量值
+        metrics = parsed.get("metrics") or {}
+        if not any(
+            k in metrics
+            for k in ("elapsed_time", "execution_time", "response_time", "duration")
+        ):
+            metrics["elapsed_time"] = round(elapsed, 3)
+            parsed["metrics"] = metrics
+
+        return parsed
 
     def _evaluate_case(
         self,
@@ -363,7 +392,9 @@ class EvaluationExecutor:
             task.status = "failed"
             task.error_message = message
             db.commit()
-            self._broadcast_progress(task.id, task.progress_current, task.progress_total, "failed")
+            self._broadcast_progress(
+                task.id, task.progress_current, task.progress_total, "failed"
+            )
 
     def _broadcast_progress(self, task_id: str, current: int, total: int, status: str):
         """通过WebSocket广播进度更新"""

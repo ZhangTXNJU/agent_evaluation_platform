@@ -36,6 +36,7 @@ def _to_summary(task: Task) -> TaskSummary:
         dataset_id=task.dataset_id,
         metrics=task.metrics or [],
         agent_endpoint=task.agent_endpoint,
+        adapter_type=getattr(task, "adapter_type", None) or "native",
         status=task.status,
         progress_current=task.progress_current,
         progress_total=task.progress_total,
@@ -54,12 +55,14 @@ def _to_detail(task: Task, dataset_name: str = "") -> TaskDetail:
         dataset_id=task.dataset_id,
         metrics=task.metrics or [],
         agent_endpoint=task.agent_endpoint,
+        adapter_type=getattr(task, "adapter_type", None) or "native",
         status=task.status,
         progress_current=task.progress_current,
         progress_total=task.progress_total,
         created_at=task.created_at,
         updated_at=task.updated_at,
         weight_config=task.weight_config,
+        adapter_config=getattr(task, "adapter_config", None),
         result=task.result,
         error_message=task.error_message,
     )
@@ -87,9 +90,11 @@ def list_tasks(
 
     # 分页查询
     offset = (page - 1) * size
-    tasks = db.execute(
-        query.order_by(Task.created_at.desc()).offset(offset).limit(size)
-    ).scalars().all()
+    tasks = (
+        db.execute(query.order_by(Task.created_at.desc()).offset(offset).limit(size))
+        .scalars()
+        .all()
+    )
 
     # 构建响应（需要解析dataset_name）
     items = []
@@ -120,6 +125,16 @@ def create_task(body: TaskCreate, db: Session = Depends(get_db)):
     if not dataset.cases or len(dataset.cases) == 0:
         raise HTTPException(status_code=400, detail="数据集为空，无法创建评估任务")
 
+    # 校验适配器类型(避免持久化非法值)
+    from core.adapters.base import AdapterRegistry
+    import core.adapters  # noqa: F401  触发适配器注册
+
+    if not AdapterRegistry.is_registered(body.adapter_type):
+        raise HTTPException(
+            status_code=400,
+            detail=f"未知的适配器类型: '{body.adapter_type}',可选: {list(AdapterRegistry.list_all().keys())}",
+        )
+
     # 创建任务
     task = Task(
         name=body.name,
@@ -127,8 +142,12 @@ def create_task(body: TaskCreate, db: Session = Depends(get_db)):
         dataset_id=body.dataset_id,
         metrics=body.metrics,
         agent_endpoint=body.agent_endpoint,
+        adapter_type=body.adapter_type,
+        adapter_config=body.adapter_config,
         weight_config=body.weight_config,
-        status="pending",
+        # status='draft' 表示"已创建但未提交执行",
+        # executor 后台轮询只取 'pending' 不取 'draft',因此用户必须手动点"执行"
+        status="draft",
         progress_total=dataset.case_count,
     )
     db.add(task)
@@ -144,9 +163,7 @@ def create_task(body: TaskCreate, db: Session = Depends(get_db)):
 @router.get("/{task_id}", response_model=TaskDetail)
 def get_task(task_id: str, db: Session = Depends(get_db)):
     """获取任务详情（含结果数据）"""
-    task = db.execute(
-        select(Task).where(Task.id == task_id)
-    ).scalar_one_or_none()
+    task = db.execute(select(Task).where(Task.id == task_id)).scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="任务未找到")
 
@@ -162,9 +179,7 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
 @router.delete("/{task_id}", response_model=SuccessResponse)
 def delete_task(task_id: str, db: Session = Depends(get_db)):
     """删除任务（仅非运行状态可删除）"""
-    task = db.execute(
-        select(Task).where(Task.id == task_id)
-    ).scalar_one_or_none()
+    task = db.execute(select(Task).where(Task.id == task_id)).scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="任务未找到")
 
@@ -181,22 +196,25 @@ def delete_task(task_id: str, db: Session = Depends(get_db)):
 @router.post("/{task_id}/execute", response_model=TaskSummary)
 def execute_task(task_id: str, db: Session = Depends(get_db)):
     """手动触发任务执行（状态从pending变为running）"""
-    task = db.execute(
-        select(Task).where(Task.id == task_id)
-    ).scalar_one_or_none()
+    task = db.execute(select(Task).where(Task.id == task_id)).scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="任务未找到")
 
     if task.status == "running":
         raise HTTPException(status_code=409, detail="任务已在运行中")
 
-    if task.status not in ("pending", "failed"):
+    # 允许的可执行起始状态:
+    # - draft   : 刚创建,从未跑过(默认)
+    # - pending : 已排队等待 executor 拾取
+    # - failed  : 上一次跑失败,允许重试
+    # done 状态不允许覆盖,要重跑请用"重跑"按钮(创建一个新任务)
+    if task.status not in ("draft", "pending", "failed"):
         raise HTTPException(
             status_code=409,
-            detail=f"当前状态 '{task.status}' 不允许重新执行",
+            detail=f"当前状态 '{task.status}' 不允许执行;如需重跑请使用'重跑'按钮",
         )
 
-    # 重置进度并标记为pending，由executor后台线程接管
+    # 转入 pending 队列,由 executor 后台线程接管;同时清空上次结果
     task.status = "pending"
     task.progress_current = 0
     task.error_message = None
@@ -217,9 +235,7 @@ def execute_task(task_id: str, db: Session = Depends(get_db)):
 @router.get("/{task_id}/result", response_model=EvaluationResult)
 def get_task_result(task_id: str, db: Session = Depends(get_db)):
     """获取任务的完整评估结果（含每用例详情）"""
-    task = db.execute(
-        select(Task).where(Task.id == task_id)
-    ).scalar_one_or_none()
+    task = db.execute(select(Task).where(Task.id == task_id)).scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="任务未找到")
 
@@ -239,9 +255,7 @@ def get_task_result(task_id: str, db: Session = Depends(get_db)):
 @router.get("/{task_id}/result/summary", response_model=ResultSummary)
 def get_task_result_summary(task_id: str, db: Session = Depends(get_db)):
     """获取任务结果摘要（仅总分和各指标均分）"""
-    task = db.execute(
-        select(Task).where(Task.id == task_id)
-    ).scalar_one_or_none()
+    task = db.execute(select(Task).where(Task.id == task_id)).scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="任务未找到")
 

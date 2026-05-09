@@ -25,6 +25,8 @@ dist/
 .DS_Store
 Thumbs.db
 Desktop.ini
+# Windows 保留名 nul 误产物 (shell 重定向 > nul 在 git bash 里会创建普通文件)
+nul
 
 # Environment
 .env

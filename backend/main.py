@@ -19,14 +19,17 @@ async def lifespan(app: FastAPI):
 
     # 启动时：初始化数据库表 + 导入种子数据
     from db import init_db
+
     init_db()
 
     # 导入种子数据（首次启动幂等）
     import init_db as seed_module
+
     seed_module.seed_default_dataset()
 
     # 启动评估执行引擎（后台线程）
     from core.executor import EvaluationExecutor
+
     _executor = EvaluationExecutor()
     _executor.start()
 
@@ -58,10 +61,12 @@ app.add_middleware(
 from api.datasets import router as datasets_router
 from api.tasks import router as tasks_router
 from api.compare import router as compare_router
+from api.adapters import router as adapters_router
 
 app.include_router(datasets_router, prefix="/api/v1")
 app.include_router(tasks_router, prefix="/api/v1")
 app.include_router(compare_router, prefix="/api/v1")
+app.include_router(adapters_router, prefix="/api/v1")
 
 
 # ── WebSocket 端点（T050：实时进度推送） ──

@@ -59,6 +59,20 @@ const TaskList: React.FC = () => {
     loadTasks();
   }, [loadTasks]);
 
+  // ── 自动轮询: 列表里有 pending/running 状态时,每 3 秒刷新一次 ──
+  // 用 useEffect 监听 tasks 变化,只在需要时启动定时器,避免无谓开销
+  useEffect(() => {
+    const hasActiveTask = tasks.some(
+      (t) => t.status === 'pending' || t.status === 'running'
+    );
+    if (!hasActiveTask) return;
+
+    const timer = setInterval(() => {
+      loadTasks();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [tasks, loadTasks]);
+
   // ── 执行任务 ──
   const handleExecute = async (id: string) => {
     try {
@@ -159,8 +173,10 @@ const TaskList: React.FC = () => {
       width: 260,
       render: (_, record) => (
         <Space size="small">
-          {/* 执行：仅pending/failed状态可执行 */}
-          {(record.status === 'pending' || record.status === 'failed') && (
+          {/* 执行：draft / pending / failed 都允许点 */}
+          {(record.status === 'draft' ||
+            record.status === 'pending' ||
+            record.status === 'failed') && (
             <Button
               type="primary"
               size="small"
