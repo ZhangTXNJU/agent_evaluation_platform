@@ -112,6 +112,11 @@ const TaskDetailPage: React.FC = () => {
             <Tag>{task.agent_version}</Tag>
           </Descriptions.Item>
           <Descriptions.Item label="数据集">{task.dataset_name}</Descriptions.Item>
+          <Descriptions.Item label="评估模式">
+            <Tag color={task.eval_mode === 'multi_turn' ? 'purple' : 'blue'}>
+              {task.eval_mode === 'multi_turn' ? '多轮对话' : '单轮'}
+            </Tag>
+          </Descriptions.Item>
           <Descriptions.Item label="状态">
             <StatusBadge status={task.status} />
           </Descriptions.Item>
@@ -173,6 +178,9 @@ const TaskDetailPage: React.FC = () => {
                   tool_accuracy: '工具调用准确性',
                   llm_judge: 'LLM推理评分',
                   response_time: '响应时间',
+                  dialogue_quality: '对话质量',
+                  task_completion: '任务完成度',
+                  conversation_efficiency: '对话效率',
                 };
 
                 return {
@@ -195,6 +203,83 @@ const TaskDetailPage: React.FC = () => {
               })}
             />
           </Card>
+
+          {/* 多轮对话转录本 */}
+          {task.eval_mode === 'multi_turn' && (
+            <Card title="对话转录本" style={{ marginBottom: 16 }}>
+              <Collapse
+                items={caseResults.map((c, idx) => {
+                  const output = c.agent_output as Record<string, unknown> | undefined;
+                  const transcript = output?.transcript as Array<{ role: string; content: string }> | undefined;
+                  const turns = output?.turns as number | undefined;
+                  const simulatorEval = output?.simulator_eval as Record<string, unknown> | undefined;
+
+                  return {
+                    key: c.case_id,
+                    label: (
+                      <Space>
+                        <Text strong>用例: {c.case_id}</Text>
+                        <Tag>{turns ?? 0} 轮</Tag>
+                        {simulatorEval && (
+                          <Tag color={(simulatorEval.task_completed as boolean) ? 'success' : 'error'}>
+                            {(simulatorEval.task_completed as boolean) ? '完成' : '未完成'}
+                          </Tag>
+                        )}
+                      </Space>
+                    ),
+                    children: (
+                      <div>
+                        {simulatorEval && (
+                          <Card size="small" style={{ marginBottom: 12, background: '#fafafa' }}>
+                            <Descriptions size="small" column={1}>
+                              <Descriptions.Item label="任务完成">
+                                <Tag color={(simulatorEval.task_completed as boolean) ? 'success' : 'error'}>
+                                  {(simulatorEval.task_completed as boolean) ? '是' : '否'}
+                                </Tag>
+                              </Descriptions.Item>
+                              <Descriptions.Item label="用户满意度">
+                                {simulatorEval.user_satisfaction !== undefined
+                                  ? `${((simulatorEval.user_satisfaction as number) * 100).toFixed(0)}%`
+                                  : '-'}
+                              </Descriptions.Item>
+                              <Descriptions.Item label="判断理由">
+                                {(simulatorEval.completion_reason as string) || '-'}
+                              </Descriptions.Item>
+                            </Descriptions>
+                          </Card>
+                        )}
+                        {transcript && transcript.length > 0 ? (
+                          <div style={{ maxHeight: 400, overflow: 'auto' }}>
+                            {transcript.map((msg, i) => (
+                              <div
+                                key={i}
+                                style={{
+                                  marginBottom: 8,
+                                  padding: '8px 12px',
+                                  background: msg.role === 'user' ? '#e6f7ff' : '#f6ffed',
+                                  borderRadius: 8,
+                                  borderLeft: `3px solid ${msg.role === 'user' ? '#1890ff' : '#52c41a'}`,
+                                }}
+                              >
+                                <Text strong style={{ fontSize: 12, color: msg.role === 'user' ? '#1890ff' : '#52c41a' }}>
+                                  {msg.role === 'user' ? '用户' : 'Agent'}
+                                </Text>
+                                <Paragraph style={{ marginBottom: 0, marginTop: 4, whiteSpace: 'pre-wrap' }}>
+                                  {msg.content}
+                                </Paragraph>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <Empty description="无对话记录" />
+                        )}
+                      </div>
+                    ),
+                  };
+                })}
+              />
+            </Card>
+          )}
 
           {/* 执行追踪回放 */}
           <Card title="Agent执行追踪回放" style={{ marginBottom: 16 }}>
@@ -338,10 +423,17 @@ const MetricDetailPanel: React.FC<{
           {
             title: 'LLM评语',
             key: 'comment',
-            ellipsis: true,
             render: (_, r) => {
               const d = r.metric_details[metricName] as Record<string, unknown> | undefined;
-              return (d?.comment as string) || '-';
+              const comment = (d?.comment as string) || '-';
+              return (
+                <Paragraph
+                  ellipsis={{ rows: 2, expandable: true, symbol: '展开全文' }}
+                  style={{ marginBottom: 0, maxWidth: 400 }}
+                >
+                  {comment}
+                </Paragraph>
+              );
             },
           },
         ]}
@@ -373,6 +465,190 @@ const MetricDetailPanel: React.FC<{
               const d = r.metric_details[metricName] as Record<string, unknown> | undefined;
               const elapsed = d?.elapsed_seconds as number | undefined;
               return elapsed !== undefined ? `${elapsed.toFixed(2)}s` : '-';
+            },
+          },
+        ]}
+      />
+    );
+  }
+
+  if (metricName === 'dialogue_quality') {
+    return (
+      <Table
+        dataSource={caseResults}
+        rowKey="case_id"
+        size="small"
+        pagination={false}
+        columns={[
+          { title: '用例ID', dataIndex: 'case_id', key: 'case_id' },
+          {
+            title: '综合分',
+            key: 'score',
+            render: (_, r) => {
+              const score = r.metric_scores[metricName];
+              return score !== undefined ? `${(score * 100).toFixed(0)}%` : '-';
+            },
+          },
+          {
+            title: '目标达成',
+            key: 'goal',
+            render: (_, r) => {
+              const d = r.metric_details[metricName] as Record<string, unknown> | undefined;
+              return d?.goal_achievement !== undefined ? `${d.goal_achievement}` : '-';
+            },
+          },
+          {
+            title: '回复相关',
+            key: 'relevance',
+            render: (_, r) => {
+              const d = r.metric_details[metricName] as Record<string, unknown> | undefined;
+              return d?.response_relevance !== undefined ? `${d.response_relevance}` : '-';
+            },
+          },
+          {
+            title: '信息充分',
+            key: 'info',
+            render: (_, r) => {
+              const d = r.metric_details[metricName] as Record<string, unknown> | undefined;
+              return d?.information_sufficiency !== undefined ? `${d.information_sufficiency}` : '-';
+            },
+          },
+          {
+            title: '用户体验',
+            key: 'ux',
+            render: (_, r) => {
+              const d = r.metric_details[metricName] as Record<string, unknown> | undefined;
+              return d?.user_experience !== undefined ? `${d.user_experience}` : '-';
+            },
+          },
+          {
+            title: 'LLM评语',
+            key: 'comment',
+            render: (_, r) => {
+              const d = r.metric_details[metricName] as Record<string, unknown> | undefined;
+              const comment = (d?.comment as string) || '-';
+              return (
+                <Paragraph
+                  ellipsis={{ rows: 2, expandable: true, symbol: '展开全文' }}
+                  style={{ marginBottom: 0, maxWidth: 400 }}
+                >
+                  {comment}
+                </Paragraph>
+              );
+            },
+          },
+        ]}
+      />
+    );
+  }
+
+  if (metricName === 'task_completion') {
+    return (
+      <Table
+        dataSource={caseResults}
+        rowKey="case_id"
+        size="small"
+        pagination={false}
+        columns={[
+          { title: '用例ID', dataIndex: 'case_id', key: 'case_id' },
+          {
+            title: '得分',
+            key: 'score',
+            render: (_, r) => {
+              const score = r.metric_scores[metricName];
+              return score !== undefined ? `${(score * 100).toFixed(0)}%` : '-';
+            },
+          },
+          {
+            title: '任务完成',
+            key: 'completed',
+            render: (_, r) => {
+              const d = r.metric_details[metricName] as Record<string, unknown> | undefined;
+              const completed = d?.task_completed as boolean | undefined;
+              return (
+                <Tag color={completed ? 'success' : 'error'}>
+                  {completed ? '完成' : '未完成'}
+                </Tag>
+              );
+            },
+          },
+          {
+            title: '完成原因',
+            key: 'reason',
+            render: (_, r) => {
+              const d = r.metric_details[metricName] as Record<string, unknown> | undefined;
+              const reason = (d?.completion_reason as string) || '-';
+              return (
+                <Paragraph
+                  ellipsis={{ rows: 2, expandable: true, symbol: '展开全文' }}
+                  style={{ marginBottom: 0, maxWidth: 400 }}
+                >
+                  {reason}
+                </Paragraph>
+              );
+            },
+          },
+        ]}
+      />
+    );
+  }
+
+  if (metricName === 'conversation_efficiency') {
+    return (
+      <Table
+        dataSource={caseResults}
+        rowKey="case_id"
+        size="small"
+        pagination={false}
+        columns={[
+          { title: '用例ID', dataIndex: 'case_id', key: 'case_id' },
+          {
+            title: '得分',
+            key: 'score',
+            render: (_, r) => {
+              const score = r.metric_scores[metricName];
+              return score !== undefined ? `${(score * 100).toFixed(0)}%` : '-';
+            },
+          },
+          {
+            title: '预期轮次',
+            key: 'expected',
+            render: (_, r) => {
+              const d = r.metric_details[metricName] as Record<string, unknown> | undefined;
+              return d?.expected_turns !== undefined ? `${d.expected_turns}` : '-';
+            },
+          },
+          {
+            title: '实际轮次',
+            key: 'actual',
+            render: (_, r) => {
+              const d = r.metric_details[metricName] as Record<string, unknown> | undefined;
+              return d?.actual_turns !== undefined ? `${d.actual_turns}` : '-';
+            },
+          },
+          {
+            title: '效率比',
+            key: 'ratio',
+            render: (_, r) => {
+              const d = r.metric_details[metricName] as Record<string, unknown> | undefined;
+              const ratio = d?.efficiency_ratio as number | undefined;
+              return ratio !== undefined ? `${(ratio * 100).toFixed(0)}%` : '-';
+            },
+          },
+          {
+            title: '评价',
+            key: 'comment',
+            render: (_, r) => {
+              const d = r.metric_details[metricName] as Record<string, unknown> | undefined;
+              const comment = (d?.comment as string) || '-';
+              return (
+                <Paragraph
+                  ellipsis={{ rows: 2, expandable: true, symbol: '展开全文' }}
+                  style={{ marginBottom: 0, maxWidth: 400 }}
+                >
+                  {comment}
+                </Paragraph>
+              );
             },
           },
         ]}

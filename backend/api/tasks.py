@@ -61,6 +61,8 @@ def _to_detail(task: Task, dataset_name: str = "") -> TaskDetail:
         progress_total=task.progress_total,
         created_at=task.created_at,
         updated_at=task.updated_at,
+        eval_mode=getattr(task, "eval_mode", None) or "single_turn",
+        simulator_config=getattr(task, "simulator_config", None),
         weight_config=task.weight_config,
         adapter_config=getattr(task, "adapter_config", None),
         result=task.result,
@@ -144,6 +146,8 @@ def create_task(body: TaskCreate, db: Session = Depends(get_db)):
         agent_endpoint=body.agent_endpoint,
         adapter_type=body.adapter_type,
         adapter_config=body.adapter_config,
+        eval_mode=body.eval_mode,
+        simulator_config=body.simulator_config,
         weight_config=body.weight_config,
         # status='draft' 表示"已创建但未提交执行",
         # executor 后台轮询只取 'pending' 不取 'draft',因此用户必须手动点"执行"

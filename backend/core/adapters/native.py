@@ -21,6 +21,7 @@ class NativeAdapter(BaseAgentAdapter):
         self,
         case_meta: Dict[str, Any],
         adapter_config: Optional[Dict[str, Any]] = None,
+        history: Optional[list] = None,
     ) -> Dict[str, Any]:
         # 透传 case 信息,session_config 由调用方/任务级配置决定
         session_config: Dict[str, Any] = {
@@ -31,10 +32,30 @@ class NativeAdapter(BaseAgentAdapter):
         if adapter_config and isinstance(adapter_config.get("session_config"), dict):
             session_config.update(adapter_config["session_config"])
 
-        return {
-            "input": case_meta.get("input", ""),
-            "session_config": session_config,
-        }
+        # 多轮模式: 将场景信息作为上下文传入，对话历史独立传递
+        if history:
+            scenario = case_meta.get("scenario", {})
+            # 构建场景上下文，让 Agent 知道自己在对话中的角色
+            ctx_parts = []
+            if scenario.get("goal"):
+                ctx_parts.append(f"用户目标: {scenario['goal']}")
+            if scenario.get("persona"):
+                ctx_parts.append(f"用户人设: {scenario['persona']}")
+            if scenario.get("context"):
+                ctx_parts.append(f"上下文: {scenario['context']}")
+            ctx = "\n".join(ctx_parts) if ctx_parts else case_meta.get("input", "")
+            body = {
+                "input": f"[场景背景]\n{ctx}" if ctx else "",
+                "session_config": session_config,
+                "history": history,
+            }
+        else:
+            body = {
+                "input": case_meta.get("input", ""),
+                "session_config": session_config,
+            }
+
+        return body
 
     def parse_response(
         self,

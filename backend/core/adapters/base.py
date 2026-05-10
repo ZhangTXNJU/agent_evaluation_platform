@@ -36,6 +36,7 @@ class BaseAgentAdapter(ABC):
         self,
         case_meta: Dict[str, Any],
         adapter_config: Optional[Dict[str, Any]] = None,
+        history: Optional[list] = None,
     ) -> Dict[str, Any]:
         """
         把测试用例翻译为发给目标 Agent 的 JSON body。
@@ -43,6 +44,8 @@ class BaseAgentAdapter(ABC):
         Args:
             case_meta: 测试用例字典(含 input / expected_constraints / 等)
             adapter_config: 任务级适配器配置(API key、model、自定义参数)
+            history: 多轮对话历史 [{"role":"user","content":"..."}, ...],
+                     单轮模式为 None
 
         Returns:
             HTTP POST 的 JSON body

@@ -40,6 +40,12 @@ class Task(Base):
     # 适配器额外配置(model、api_key、temperature 等);随适配器类型不同而不同
     adapter_config = Column(JSON, nullable=True)
 
+    # 评估模式: "single_turn"(默认,向后兼容) / "multi_turn"(多轮对话评估)
+    eval_mode = Column(String(20), nullable=False, default="single_turn")
+
+    # User Simulator配置(多轮模式专用): {api_base, api_key, model, temperature}
+    simulator_config = Column(JSON, nullable=True)
+
     # 可选的自定义权重配置，不设置则等权重
     weight_config = Column(JSON, nullable=True)
 

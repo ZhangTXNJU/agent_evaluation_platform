@@ -21,12 +21,13 @@ import {
   Divider,
   Tag,
   Tooltip,
+  Radio,
 } from 'antd';
 import { PlusOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { datasetApi, taskApi, adapterApi } from '../services/api';
 import MetricsSelector from '../components/MetricsSelector';
 import { AVAILABLE_METRICS } from '../components/MetricsSelector';
-import type { DatasetSummary, EndpointPreset } from '../types';
+import type { DatasetSummary, EndpointPreset, SimulatorConfig } from '../types';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -42,6 +43,9 @@ interface TaskFormValues {
   weight_tool_accuracy?: number;
   weight_llm_judge?: number;
   weight_response_time?: number;
+  weight_dialogue_quality?: number;
+  weight_task_completion?: number;
+  weight_conversation_efficiency?: number;
 }
 
 const CreateTask: React.FC = () => {
@@ -60,6 +64,14 @@ const CreateTask: React.FC = () => {
   const [adapterType, setAdapterType] = useState<string>('native');
   const [adapterConfigText, setAdapterConfigText] = useState<string>('{}');
   const [adapterConfigError, setAdapterConfigError] = useState<string | null>(null);
+
+  // 评估模式
+  const [evalMode, setEvalMode] = useState<'single_turn' | 'multi_turn'>('single_turn');
+  // User Simulator 配置
+  const [simulatorApiBase, setSimulatorApiBase] = useState('');
+  const [simulatorApiKey, setSimulatorApiKey] = useState('');
+  const [simulatorModel, setSimulatorModel] = useState('');
+  const [simulatorTemperature, setSimulatorTemperature] = useState(0.7);
 
   // ── 初始化加载 ──
   useEffect(() => {
@@ -144,6 +156,9 @@ const CreateTask: React.FC = () => {
         tool_accuracy: 'weight_tool_accuracy',
         llm_judge: 'weight_llm_judge',
         response_time: 'weight_response_time',
+        dialogue_quality: 'weight_dialogue_quality',
+        task_completion: 'weight_task_completion',
+        conversation_efficiency: 'weight_conversation_efficiency',
       };
 
       let hasCustomWeights = false;
@@ -158,6 +173,17 @@ const CreateTask: React.FC = () => {
         }
       }
 
+      // 构建 Simulator 配置
+      const simulatorConfig: SimulatorConfig | undefined =
+        evalMode === 'multi_turn'
+          ? {
+              api_base: simulatorApiBase || undefined,
+              api_key: simulatorApiKey || undefined,
+              model: simulatorModel || undefined,
+              temperature: simulatorTemperature,
+            }
+          : undefined;
+
       await taskApi.create({
         name: values.name,
         agent_version: values.agent_version,
@@ -166,6 +192,8 @@ const CreateTask: React.FC = () => {
         agent_endpoint: values.agent_endpoint,
         adapter_type: adapterType,
         adapter_config: Object.keys(adapterConfig).length ? adapterConfig : undefined,
+        eval_mode: evalMode,
+        simulator_config: simulatorConfig,
         weight_config: hasCustomWeights ? weightConfig : undefined,
       });
 
@@ -290,6 +318,82 @@ const CreateTask: React.FC = () => {
               </Space>
               <Text type="secondary" style={{ fontSize: 12 }}>
                 权重最终会被归一化,确保总和为1。留空则所有选定指标等权重。
+              </Text>
+            </Card>
+          )}
+
+          {/* ── 评估模式选择 ── */}
+          <Divider orientation="left" plain>
+            评估模式
+          </Divider>
+
+          <Form.Item label="评估模式">
+            <Radio.Group
+              value={evalMode}
+              onChange={(e) => setEvalMode(e.target.value)}
+            >
+              <Radio.Button value="single_turn">
+                单轮评估
+                <Tooltip title="传统模式: 一次请求-响应,对Agent的输出进行评估">
+                  <InfoCircleOutlined style={{ marginLeft: 4, color: '#999' }} />
+                </Tooltip>
+              </Radio.Button>
+              <Radio.Button value="multi_turn">
+                多轮对话评估
+                <Tooltip title="LLM扮演用户,与被测Agent进行多轮对话,评估对话质量和任务完成度">
+                  <InfoCircleOutlined style={{ marginLeft: 4, color: '#999' }} />
+                </Tooltip>
+              </Radio.Button>
+            </Radio.Group>
+          </Form.Item>
+
+          {/* ── User Simulator 配置(多轮模式) ── */}
+          {evalMode === 'multi_turn' && (
+            <Card
+              size="small"
+              title={
+                <span>
+                  User Simulator 配置{' '}
+                  <Tooltip title="Simulator是扮演用户的LLM。留空则使用环境变量(SIMULATOR_* 或 OPENAI_*)。">
+                    <InfoCircleOutlined style={{ color: '#999' }} />
+                  </Tooltip>
+                </span>
+              }
+              style={{ marginBottom: 16, background: '#fafafa' }}
+            >
+              <Form.Item label="API Base URL" style={{ marginBottom: 12 }}>
+                <Input
+                  placeholder="https://api.openai.com/v1 (留空用环境变量)"
+                  value={simulatorApiBase}
+                  onChange={(e) => setSimulatorApiBase(e.target.value)}
+                />
+              </Form.Item>
+              <Form.Item label="API Key" style={{ marginBottom: 12 }}>
+                <Input.Password
+                  placeholder="sk-... (留空用环境变量 SIMULATOR_API_KEY)"
+                  value={simulatorApiKey}
+                  onChange={(e) => setSimulatorApiKey(e.target.value)}
+                />
+              </Form.Item>
+              <Form.Item label="Model" style={{ marginBottom: 12 }}>
+                <Input
+                  placeholder="gpt-3.5-turbo (留空用环境变量)"
+                  value={simulatorModel}
+                  onChange={(e) => setSimulatorModel(e.target.value)}
+                />
+              </Form.Item>
+              <Form.Item label="Temperature" style={{ marginBottom: 0 }}>
+                <InputNumber
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={simulatorTemperature}
+                  onChange={(v) => setSimulatorTemperature(v ?? 0.7)}
+                  style={{ width: 120 }}
+                />
+              </Form.Item>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+                推荐使用 GPT-4 或 DeepSeek-V3 作为 Simulator 以获得更真实的用户模拟效果。
               </Text>
             </Card>
           )}

@@ -127,6 +127,7 @@ class OpenAIChatAdapter(BaseAgentAdapter):
         self,
         case_meta: Dict[str, Any],
         adapter_config: Optional[Dict[str, Any]] = None,
+        history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         cfg = adapter_config or {}
 
@@ -135,12 +136,23 @@ class OpenAIChatAdapter(BaseAgentAdapter):
         temperature = cfg.get("temperature", 0.3)
         max_tokens = cfg.get("max_tokens", 1500)
 
+        # 构建消息列表
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": system_prompt},
+        ]
+
+        if history:
+            # 多轮模式: 把对话历史合并到 messages 中
+            messages.extend(history)
+        else:
+            # 单轮模式: 直接用测试用例的 input
+            messages.append(
+                {"role": "user", "content": case_meta.get("input", "")}
+            )
+
         body: Dict[str, Any] = {
             "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": case_meta.get("input", "")},
-            ],
+            "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }

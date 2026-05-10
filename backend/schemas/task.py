@@ -30,6 +30,14 @@ class TaskCreate(BaseModel):
         None,
         description="适配器配置(model、api_key、temperature 等),随适配器类型不同而不同",
     )
+    eval_mode: str = Field(
+        "single_turn",
+        description="评估模式: 'single_turn'(单轮,默认) 或 'multi_turn'(多轮对话)",
+    )
+    simulator_config: Optional[Dict[str, Any]] = Field(
+        None,
+        description="User Simulator配置(多轮模式专用): api_base, api_key, model, temperature",
+    )
     weight_config: Optional[Dict[str, float]] = Field(
         None, description="自定义指标权重，不设置则等权重"
     )
@@ -37,7 +45,10 @@ class TaskCreate(BaseModel):
     @model_validator(mode="after")
     def check_valid_metrics(self):
         """校验指标名称是否合法"""
-        valid_metrics = {"success_rate", "tool_accuracy", "llm_judge", "response_time"}
+        valid_metrics = {
+            "success_rate", "tool_accuracy", "llm_judge", "response_time",
+            "dialogue_quality", "task_completion", "conversation_efficiency",
+        }
         for m in self.metrics:
             if m not in valid_metrics:
                 raise ValueError(f"无效的指标名称: '{m}'，可选值: {valid_metrics}")
@@ -114,6 +125,8 @@ class ResultSummary(BaseModel):
 class TaskDetail(TaskSummary):
     """任务详情，包含完整配置和结果"""
 
+    eval_mode: str = "single_turn"
+    simulator_config: Optional[Dict[str, Any]] = None
     weight_config: Optional[Dict[str, float]] = None
     adapter_config: Optional[Dict[str, Any]] = None
     result: Optional[EvaluationResult] = None

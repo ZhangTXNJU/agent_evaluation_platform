@@ -49,7 +49,7 @@ class LLMJudgeMetric(BaseMetric):
         # LLM配置：从环境变量读取，默认使用OpenAI兼容API
         self.api_key = os.getenv("LLM_JUDGE_API_KEY", os.getenv("OPENAI_API_KEY", ""))
         self.api_base = os.getenv("LLM_JUDGE_API_BASE", os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1"))
-        self.model = os.getenv("LLM_JUDGE_MODEL", "gpt-3.5-turbo")
+        self.model = os.getenv("LLM_JUDGE_MODEL", "deepseek-chat")
 
     def compute(self, case_result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -145,15 +145,24 @@ class LLMJudgeMetric(BaseMetric):
         except ImportError:
             raise RuntimeError("openai库未安装，请执行 pip install openai")
 
-        client = OpenAI(api_key=self.api_key, base_url=self.api_base)
+        import httpx
+        client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.api_base,
+            timeout=httpx.Timeout(60.0, connect=10.0),
+        )
         prompt = JUDGE_PROMPT.format(input=user_input, thoughts=thoughts_text)
 
-        response = client.chat.completions.create(
+        kwargs = dict(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,  # 低温度以获得稳定评分
-            max_tokens=500,
+            temperature=0.1,
+            max_tokens=1024,
         )
+        if "openai.com" in self.api_base:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        response = client.chat.completions.create(**kwargs)
 
         content = response.choices[0].message.content
         if content:

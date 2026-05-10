@@ -63,6 +63,8 @@ def _migrate_add_columns():
     new_columns = [
         ("adapter_type", "VARCHAR(50) NOT NULL DEFAULT 'native'"),
         ("adapter_config", "JSON"),
+        ("eval_mode", "VARCHAR(20) NOT NULL DEFAULT 'single_turn'"),
+        ("simulator_config", "JSON"),
     ]
 
     with engine.connect() as conn:

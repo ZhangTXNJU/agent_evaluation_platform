@@ -1,0 +1,67 @@
+[
+  {
+    "id": "conv_easy_001",
+    "scenario": {
+      "goal": "用户想规划一个3天北京游,预算3000元",
+      "persona": "对北京不熟悉的游客,喜欢历史文化,从上海出发",
+      "context": "偏好高铁出行,对住宿要求干净即可,预算3000元包含交通+住宿+门票",
+      "success_criteria": "Agent提供了包含故宫、长城、颐和园中至少2个景点的3天行程,给出了大致的交通、住宿和门票费用估算,总花费在3000元左右"
+    },
+    "max_turns": 10,
+    "expected_turns": 6,
+    "difficulty": "easy",
+    "expected_tools": ["search_attractions", "search_train", "search_hotels", "plan_itinerary"]
+  },
+  {
+    "id": "conv_easy_002",
+    "scenario": {
+      "goal": "用户想查询下周去杭州的天气,并让Agent推荐适合的景点",
+      "persona": "一个喜欢户外活动的年轻人,对杭州了解不多",
+      "context": "计划下周一至周三出行,喜欢自然风光和徒步,不太喜欢人多的商业景点",
+      "success_criteria": "Agent查询了杭州下周天气,根据天气推荐了适合户外活动的景点(如西湖、九溪、龙井),并说明了每个景点的特点"
+    },
+    "max_turns": 8,
+    "expected_turns": 4,
+    "difficulty": "easy",
+    "expected_tools": ["query_weather", "search_attractions"]
+  },
+  {
+    "id": "conv_medium_001",
+    "scenario": {
+      "goal": "用户想带家人(2大人1小孩)去成都玩4天,需要Agent综合考虑亲子友好、预算和交通",
+      "persona": "一个注重性价比的家庭出游者,孩子6岁,对成都美食感兴趣但更看重孩子的体验",
+      "context": "从北京出发,预算5000元,希望Agent推荐亲子友好的景点和性价比高的酒店,需要知道哪些景点适合小孩",
+      "success_criteria": "Agent提供了包含亲子友好景点(如大熊猫基地)的4天行程,考虑了家庭出行的特殊需求,给出了预算分配方案,交通+住宿+门票在5000元预算内"
+    },
+    "max_turns": 12,
+    "expected_turns": 8,
+    "difficulty": "medium",
+    "expected_tools": ["search_attractions", "search_flights", "search_hotels", "estimate_budget", "plan_itinerary"]
+  },
+  {
+    "id": "conv_medium_002",
+    "scenario": {
+      "goal": "用户需要在上海和南京之间选择一个城市进行周末2日游,让Agent帮忙比较后推荐",
+      "persona": "一个选择困难的人,对两个城市都不太了解,需要Agent给出客观的比较分析",
+      "context": "从合肥出发,高铁2小时内可达两个城市,预算1500元,喜欢文化和美食体验",
+      "success_criteria": "Agent比较了两个城市的景点、美食、交通、费用,给出了有依据的推荐,并提供了被推荐城市的2日行程安排,预算在1500元以内"
+    },
+    "max_turns": 10,
+    "expected_turns": 7,
+    "difficulty": "medium",
+    "expected_tools": ["search_attractions", "search_train", "estimate_budget", "plan_itinerary"]
+  },
+  {
+    "id": "conv_hard_001",
+    "scenario": {
+      "goal": "用户需要Agent规划一个复杂的多城旅行:从广州出发→桂林(2天)→贵阳(1天)→重庆(2天)→返回广州,共5天4城",
+      "persona": "一个喜欢高效旅行的背包客,对时间安排要求严格,需要精确的车次衔接",
+      "context": "预算4000元,偏好高铁出行,需要在每个城市至少看1个标志性景点,对住宿要求不高(青旅即可),但需要Agent给出精确的时间衔接方案",
+      "success_criteria": "Agent给出了广州→桂林→贵阳→重庆→广州的完整5天行程,包含了每个城市的高铁车次建议、景点推荐、住宿建议,总预算在4000元左右,城市之间的时间衔接合理"
+    },
+    "max_turns": 15,
+    "expected_turns": 10,
+    "difficulty": "hard",
+    "expected_tools": ["search_attractions", "search_train", "search_hotels", "estimate_budget", "query_weather", "plan_itinerary"]
+  }
+]

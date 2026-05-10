@@ -4,6 +4,21 @@ FastAPI应用入口 (T007)
 启动命令: uvicorn main:app --reload --port 8001
 """
 
+# 最优先: 加载 .env 文件中的环境变量
+from dotenv import load_dotenv
+load_dotenv()
+
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+# 抑制 httpx / openai 的 INFO 日志
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware

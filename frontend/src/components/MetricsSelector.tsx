@@ -31,6 +31,21 @@ const AVAILABLE_METRICS = [
     label: '响应时间',
     description: '衡量Agent处理单个测试用例的执行效率（≤30秒满分）',
   },
+  {
+    key: 'dialogue_quality',
+    label: '对话质量',
+    description: '使用LLM评估多轮对话的目标达成度、回复相关性、信息充分性和用户体验',
+  },
+  {
+    key: 'task_completion',
+    label: '任务完成度',
+    description: '评估多轮对话中Agent是否成功完成了用户的目标(二元: 完成/未完成)',
+  },
+  {
+    key: 'conversation_efficiency',
+    label: '对话效率',
+    description: '评估完成目标所需的对话轮次是否高效(实际轮次 vs 预期轮次)',
+  },
 ];
 
 interface MetricsSelectorProps {

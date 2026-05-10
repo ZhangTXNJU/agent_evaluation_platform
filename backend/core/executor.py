@@ -11,6 +11,7 @@
 6. 汇总结果并写入数据库
 """
 
+import json
 import time
 import threading
 import logging
@@ -30,6 +31,9 @@ import core.metrics.success_rate  # noqa: F401
 import core.metrics.tool_accuracy  # noqa: F401
 import core.metrics.llm_judge  # noqa: F401
 import core.metrics.response_time  # noqa: F401
+import core.metrics.dialogue_quality  # noqa: F401
+import core.metrics.task_completion  # noqa: F401
+import core.metrics.conversation_efficiency  # noqa: F401
 
 # 导入适配器模块以触发注册
 import core.adapters  # noqa: F401
@@ -152,6 +156,13 @@ class EvaluationExecutor:
                 self._fail_task(db, task, f"未知的适配器类型: {adapter_type}")
                 return
             adapter_config = task.adapter_config or {}
+
+            # 根据评估模式分发
+            if task.eval_mode == "multi_turn":
+                self._execute_multi_turn_task(
+                    db, task, dataset, adapter, adapter_config, metric_names
+                )
+                return
 
             for idx, case_meta in enumerate(dataset.cases):
                 case_id = case_meta.get("id", f"case_{idx}")
@@ -278,15 +289,17 @@ class EvaluationExecutor:
         case_meta: dict,
         adapter,
         adapter_config: dict,
+        history: Optional[list] = None,
     ) -> dict:
         """
         通过适配器调用外部 Agent,并把响应翻译成统一三段式。
 
         Args:
-            endpoint: 目标 Agent 的 HTTP URL(评估任务里配置的 agent_endpoint)
+            endpoint: 目标 Agent 的 HTTP URL
             case_meta: 测试用例数据
             adapter: 已实例化的 BaseAgentAdapter
-            adapter_config: 任务级适配器配置(model、api_key 等)
+            adapter_config: 任务级适配器配置
+            history: 多轮对话历史 [{"role":"user","content":"..."}, ...]
 
         Returns:
             {output, trace, metrics} 三段式 dict
@@ -296,9 +309,17 @@ class EvaluationExecutor:
             httpx.ConnectError: 连接失败
             httpx.HTTPStatusError: 非 2xx 响应
         """
-        request_body = adapter.build_request(case_meta, adapter_config)
+        request_body = adapter.build_request(case_meta, adapter_config, history=history)
         headers = adapter.headers(adapter_config)
         timeout = adapter.timeout_seconds(adapter_config) or CASE_TIMEOUT
+
+        # 控制台输出请求详情
+        logger.info("  → [请求] %s", endpoint)
+        logger.info("    Headers: %s", {k: v[:20] + "..." if len(v) > 20 else v for k, v in headers.items()})
+        body_preview = json.dumps(request_body, ensure_ascii=False)
+        if len(body_preview) > 500:
+            body_preview = body_preview[:500] + "..."
+        logger.info("    Body: %s", body_preview)
 
         # 自行测耗时,作为 response_time 指标的兜底数据源
         t0 = time.time()
@@ -307,6 +328,12 @@ class EvaluationExecutor:
             response.raise_for_status()
             raw = response.json()
         elapsed = time.time() - t0
+
+        # 控制台输出响应详情
+        resp_preview = json.dumps(raw, ensure_ascii=False)
+        if len(resp_preview) > 500:
+            resp_preview = resp_preview[:500] + "..."
+        logger.info("  ← [响应] HTTP %d, 耗时 %.2fs, body: %s", response.status_code, elapsed, resp_preview)
 
         parsed = adapter.parse_response(raw, adapter_config)
         # 若适配器没在 metrics 里给出 elapsed_time,补一个真实测量值
@@ -319,6 +346,274 @@ class EvaluationExecutor:
             parsed["metrics"] = metrics
 
         return parsed
+
+    def _execute_multi_turn_task(
+        self,
+        db,
+        task: Task,
+        dataset: Dataset,
+        adapter,
+        adapter_config: dict,
+        metric_names: list,
+    ):
+        """
+        执行多轮对话评估任务。
+
+        与单轮模式的核心区别:
+        - 每个测试用例是一个"对话场景"(scenario)
+        - UserSimulator扮演用户,驱动多轮对话
+        - 每轮对话调用一次 Target Agent,收集完整 transcript
+        - 对话结束后由 UserSimulator 做最终评估
+        """
+        from core.user_simulator import UserSimulator
+
+        # 构建 UserSimulator
+        sim_cfg = task.simulator_config or {}
+        try:
+            simulator = UserSimulator(
+                api_base=sim_cfg.get("api_base"),
+                api_key=sim_cfg.get("api_key"),
+                model=sim_cfg.get("model"),
+                temperature=sim_cfg.get("temperature", 0.7),
+            )
+        except Exception as e:
+            self._fail_task(db, task, f"UserSimulator初始化失败: {str(e)[:200]}")
+            return
+
+        if not simulator.is_configured:
+            self._fail_task(
+                db, task,
+                "UserSimulator未配置API Key。请在任务的simulator_config中设置api_key,"
+                "或设置环境变量 SIMULATOR_API_KEY / OPENAI_API_KEY",
+            )
+            return
+
+        case_results = []
+        started_at = datetime.now(timezone.utc)
+
+        for idx, case_meta in enumerate(dataset.cases):
+            case_id = case_meta.get("id", f"case_{idx}")
+            logger.info("  多轮对话用例: %s [%d/%d]", case_id, idx + 1, len(dataset.cases))
+
+            try:
+                conversation_result = self._run_conversation(
+                    simulator=simulator,
+                    adapter=adapter,
+                    endpoint=task.agent_endpoint,
+                    case_meta=case_meta,
+                    adapter_config=adapter_config,
+                )
+                case_result = self._evaluate_case(
+                    case_meta, conversation_result, metric_names
+                )
+            except Exception as e:
+                logger.exception("多轮对话用例异常: %s", case_id)
+                case_result = self._error_case(case_meta, "error", str(e)[:500])
+
+            case_results.append(case_result)
+
+            # 更新进度
+            task.progress_current = idx + 1
+            db.commit()
+            self._broadcast_progress(
+                task.id, task.progress_current, task.progress_total, "running"
+            )
+
+        # ── 汇总计算总分(与单轮共用同一逻辑) ──
+        completed_at = datetime.now(timezone.utc)
+        execution_time = (completed_at - started_at).total_seconds()
+
+        weight_config = task.weight_config or {}
+        if not weight_config:
+            w = 1.0 / len(metric_names) if metric_names else 1.0
+            weight_config = {name: w for name in metric_names}
+
+        metric_sums: dict = {name: 0.0 for name in metric_names}
+        valid_counts: dict = {name: 0 for name in metric_names}
+        for cr in case_results:
+            for name in metric_names:
+                s = cr.get("metric_scores", {}).get(name)
+                if s is not None:
+                    metric_sums[name] += s
+                    valid_counts[name] += 1
+
+        metric_scores = {}
+        for name in metric_names:
+            metric_scores[name] = round(
+                metric_sums[name] / valid_counts[name], 4
+            ) if valid_counts[name] > 0 else 0.0
+
+        overall_score = round(
+            sum(
+                metric_scores.get(name, 0.0) * weight_config.get(name, 0.0)
+                for name in metric_names
+            ),
+            4,
+        )
+
+        result_data = {
+            "overall_score": overall_score,
+            "metric_scores": metric_scores,
+            "case_results": case_results,
+            "execution_time_seconds": round(execution_time, 2),
+            "started_at": started_at.isoformat(),
+            "completed_at": completed_at.isoformat(),
+        }
+
+        task.result = result_data
+        task.status = "done"
+        db.commit()
+
+        self._broadcast_progress(
+            task.id, len(dataset.cases), len(dataset.cases), "done"
+        )
+
+        logger.info(
+            "多轮对话任务完成: %s, 总分=%.3f, 耗时=%.1fs",
+            task.name, overall_score, execution_time,
+        )
+
+    def _run_conversation(
+        self,
+        simulator,
+        adapter,
+        endpoint: str,
+        case_meta: dict,
+        adapter_config: dict,
+    ) -> dict:
+        """
+        对单个测试用例执行完整的多轮对话循环。
+
+        Returns:
+            统一三段式 {output, trace, metrics}, 其中 output 额外包含:
+            - transcript: 完整对话转录本
+            - turns: 实际对话轮次
+            - simulator_eval: UserSimulator的最终评估
+        """
+        # 提取场景: 优先 scenario 字段, 回退到 input
+        scenario = case_meta.get("scenario", {})
+        if not scenario or not scenario.get("goal"):
+            scenario = {"goal": case_meta.get("input", "")}
+        max_turns = case_meta.get("max_turns", 10)
+
+        # 1. UserSimulator 生成首条消息
+        try:
+            first_message = simulator.start_conversation(scenario)
+        except Exception as e:
+            logger.warning("UserSimulator首条消息生成失败: %s", e)
+            first_message = f"你好,{scenario.get('goal', '我需要帮助')}"
+
+        # 2. 对话循环
+        history: list = []
+        current_message = first_message
+        final_is_done = False
+        final_reason = ""
+
+        for turn in range(1, max_turns + 1):
+            logger.info("  [对话] 第 %d/%d 轮, 用户消息: %s", turn, max_turns, current_message[:120])
+
+            # 将当前消息加入历史
+            history.append({"role": "user", "content": current_message})
+
+            # 调用 Target Agent
+            try:
+                agent_response = self._call_agent(
+                    endpoint, case_meta, adapter, adapter_config, history=history
+                )
+            except httpx.TimeoutException:
+                history.append({
+                    "role": "assistant",
+                    "content": "[Agent超时,未响应]",
+                })
+                final_reason = f"第{turn}轮Agent响应超时"
+                break
+            except httpx.ConnectError:
+                history.append({
+                    "role": "assistant",
+                    "content": "[无法连接到Agent]",
+                })
+                final_reason = f"第{turn}轮连接Agent失败"
+                break
+            except Exception as e:
+                logger.exception("多轮对话中Agent调用异常")
+                history.append({
+                    "role": "assistant",
+                    "content": f"[Agent异常: {str(e)[:100]}]",
+                })
+                final_reason = f"第{turn}轮Agent异常"
+                break
+
+            # 提取 Agent 文本回复
+            agent_output_data = agent_response.get("output", {})
+            if isinstance(agent_output_data, dict):
+                agent_text = agent_output_data.get("plan") or agent_output_data.get("text") or str(agent_output_data)
+            else:
+                agent_text = str(agent_output_data)
+
+            history.append({"role": "assistant", "content": agent_text})
+
+            logger.info("    Agent回复: %s", agent_text[:200])
+
+            # UserSimulator 判断下一步
+            try:
+                is_done, reason, next_message = simulator.next_message(
+                    scenario, history, agent_text
+                )
+                logger.info("    Simulator判定: is_done=%s, reason=%s", is_done, reason[:120])
+            except Exception as e:
+                logger.warning("UserSimulator判断失败: %s", e)
+                is_done = True
+                reason = f"Simulator异常: {str(e)[:100]}"
+                next_message = ""
+
+            if is_done:
+                final_is_done = True
+                final_reason = reason
+                # 如果 simulator 给了结束语,加入历史
+                if next_message:
+                    history.append({"role": "user", "content": next_message})
+                break
+
+            current_message = next_message
+
+        # 3. 如果达到最大轮次仍未结束
+        if not final_is_done and not final_reason:
+            final_reason = f"达到最大轮次限制({max_turns}轮),强制结束"
+
+        # 4. UserSimulator 最终评估
+        simulator_eval = {}
+        try:
+            simulator_eval = simulator.final_evaluation(scenario, history)
+        except Exception as e:
+            logger.warning("UserSimulator最终评估失败: %s", e)
+            simulator_eval = {
+                "task_completed": final_is_done,
+                "completion_reason": final_reason or str(e)[:200],
+                "user_satisfaction": 0.5,
+                "key_issues": [],
+            }
+
+        # 5. 构建三段式格式返回
+        return {
+            "output": {
+                "transcript": history,
+                "turns": sum(1 for h in history if h["role"] == "assistant"),
+                "simulator_eval": simulator_eval,
+                "final_reason": final_reason,
+            },
+            "trace": [
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "event_type": h["role"],
+                    "data": {"content": h["content"]},
+                }
+                for h in history
+            ],
+            "metrics": {
+                "total_turns": len(history),
+                "assistant_turns": sum(1 for h in history if h["role"] == "assistant"),
+            },
+        }
 
     def _evaluate_case(
         self,

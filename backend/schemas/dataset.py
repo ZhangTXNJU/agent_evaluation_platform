@@ -13,7 +13,13 @@ class TestCaseSchema(BaseModel):
     """单个测试用例的结构定义"""
 
     id: str = Field(..., description="用例唯一标识，如 case_01")
-    input: str = Field(..., description="自然语言描述的用户旅行需求")
+    input: Optional[str] = Field(None, description="自然语言描述的用户旅行需求（单轮模式）")
+    scenario: Optional[Dict] = Field(
+        None,
+        description="多轮对话场景：goal, persona, context, success_criteria（多轮模式）",
+    )
+    max_turns: Optional[int] = Field(None, description="最大对话轮次（多轮模式）")
+    expected_turns: Optional[int] = Field(None, description="预期对话轮次（多轮模式）")
     expected_constraints: Optional[Dict] = Field(
         None,
         description="预期约束：destination, days, budget_limit, must_include_keywords",
@@ -21,6 +27,10 @@ class TestCaseSchema(BaseModel):
     expected_tool_sequence: Optional[List[str]] = Field(
         None,
         description="预期的工具调用顺序列表",
+    )
+    expected_tools: Optional[List[str]] = Field(
+        None,
+        description="预期使用的工具列表（多轮模式）",
     )
     difficulty: Optional[str] = Field(
         "medium",

@@ -4,9 +4,20 @@
  */
 
 // ── 数据集相关 ──
+export interface ConversationScenario {
+  goal: string;
+  persona: string;
+  context: string;
+  success_criteria: string;
+}
+
 export interface TestCase {
   id: string;
   input: string;
+  // 多轮对话场景(如果存在则说明这是一个对话评估用例)
+  scenario?: ConversationScenario;
+  max_turns?: number;
+  expected_turns?: number;
   expected_constraints?: {
     destination?: string;
     days?: number;
@@ -44,6 +55,13 @@ export interface DatasetCreate {
 //   failed  — 执行失败
 export type TaskStatus = 'draft' | 'pending' | 'running' | 'done' | 'failed';
 
+export interface SimulatorConfig {
+  api_base?: string;
+  api_key?: string;
+  model?: string;
+  temperature?: number;
+}
+
 export interface TaskCreate {
   name: string;
   agent_version: string;
@@ -52,6 +70,8 @@ export interface TaskCreate {
   agent_endpoint?: string;
   adapter_type?: string;
   adapter_config?: Record<string, unknown>;
+  eval_mode?: 'single_turn' | 'multi_turn';
+  simulator_config?: SimulatorConfig;
   weight_config?: Record<string, number>;
 }
 
@@ -79,6 +99,8 @@ export interface TaskListResponse {
 }
 
 export interface TaskDetail extends TaskSummary {
+  eval_mode?: string;
+  simulator_config?: SimulatorConfig;
   weight_config?: Record<string, number>;
   adapter_config?: Record<string, unknown>;
   result?: EvaluationResult;

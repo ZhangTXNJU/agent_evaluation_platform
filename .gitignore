@@ -36,6 +36,8 @@ nul
 # Database
 *.db
 *.sqlite3
+# 评估平台数据库 — 允许提交以共享评估历史
+!backend/eval_platform.db
 
 # Logs
 *.log
