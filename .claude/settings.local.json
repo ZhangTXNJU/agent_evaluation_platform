@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem -Recurse -Depth 3 -Force \"E:\\\\codes\\\\agent_evaluate_platform\" | Where-Object { $_.Name -notmatch 'node_modules|\\\\.git|\\\\.venv|__pycache__|\\\\.next|build|dist' } | ForEach-Object { $_.FullName.Replace\\(\"E:\\\\codes\\\\agent_evaluate_platform\\\\\", \"\"\\) } | Sort-Object)",
+      "PowerShell(git *)",
+      "Bash(git *)",
+      "Bash(powershell *)",
+      "PowerShell(& \".specify/extensions/git/scripts/powershell/create-new-feature.ps1\" -Json -ShortName \"agent-eval-platform\" \"创建分支吧，我打算开始实现这样的一个agent评估平台了\")"
+    ]
+  }
+}
